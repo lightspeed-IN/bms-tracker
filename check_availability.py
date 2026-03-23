@@ -98,6 +98,7 @@ def fetch_page(url: str) -> str:
     if os.environ.get("SCRAPERAPI_KEY"):
         methods.append(("ScraperAPI",   lambda: fetch_via_scraperapi(url)))
 
+    print(f"   SCRAPERAPI_KEY present: {bool(os.environ.get('SCRAPERAPI_KEY'))}")
     methods.append(("AllOrigins",   lambda: fetch_via_allorigins(url)))
     methods.append(("Direct",       lambda: fetch_direct(url)))
 
