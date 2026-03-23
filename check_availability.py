@@ -2,6 +2,7 @@ import os
 import re
 import smtplib
 import requests
+import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -13,7 +14,6 @@ NOTIFY_EMAIL = os.environ["NOTIFY_EMAIL"]
 # ─────────────────────────────────────────────────────────────────────────────
 
 EVENT_CODE = BMS_URL.rstrip("/").split("/")[-1]   # ET00451760
-CITY_CODE  = "MUMBAI"
 
 IMAX_KEYWORDS = ["imax", "imax 3d", "imax 2d", "imax laser"]
 
@@ -23,45 +23,100 @@ BROWSER_HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/123.0.0.0 Safari/537.36"
     ),
-    "Accept": (
-        "text/html,application/xhtml+xml,application/xml;"
-        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-    ),
-    "Accept-Language":           "en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding":           "gzip, deflate, br",
-    "Connection":                "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest":            "document",
-    "Sec-Fetch-Mode":            "navigate",
-    "Sec-Fetch-Site":            "none",
-    "Sec-Fetch-User":            "?1",
-    "Cache-Control":             "max-age=0",
+    "Accept":         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-IN,en;q=0.9",
 }
 
 
-def make_session() -> requests.Session:
-    """Create a session that mimics a real browser, with cookies from homepage."""
-    s = requests.Session()
-    s.headers.update(BROWSER_HEADERS)
-    try:
-        # Visit homepage first so BMS sets cookies — avoids 403
-        s.get("https://in.bookmyshow.com/", timeout=15)
-        print("🍪 Session cookies acquired from BMS homepage")
-    except Exception as e:
-        print(f"⚠️  Could not fetch homepage for cookies: {e}")
-    return s
-
-
-def fetch_page(session: requests.Session, url: str) -> str:
-    resp = session.get(url, timeout=15)
-    print(f"   HTTP {resp.status_code} for {url}")
-    if resp.status_code == 403:
-        raise Exception(
-            "403 Forbidden — BookMyShow is blocking the request. "
-            "This can happen on cloud IPs. Try re-running in a few minutes."
-        )
+# ─── METHOD 1: ScrapingBee free proxy (100 free calls/month) ─────────────────
+def fetch_via_scrapingbee(url: str) -> str:
+    api_key = os.environ.get("SCRAPINGBEE_KEY", "")
+    if not api_key:
+        raise Exception("No SCRAPINGBEE_KEY set")
+    resp = requests.get(
+        "https://app.scrapingbee.com/api/v1/",
+        params={
+            "api_key":        api_key,
+            "url":            url,
+            "render_js":      "false",
+            "country_code":   "in",
+        },
+        timeout=30,
+    )
+    print(f"   ScrapingBee HTTP {resp.status_code}")
     resp.raise_for_status()
     return resp.text
+
+
+# ─── METHOD 2: ScraperAPI free proxy (1000 free calls/month) ─────────────────
+def fetch_via_scraperapi(url: str) -> str:
+    api_key = os.environ.get("SCRAPERAPI_KEY", "")
+    if not api_key:
+        raise Exception("No SCRAPERAPI_KEY set")
+    resp = requests.get(
+        "http://api.scraperapi.com/",
+        params={
+            "api_key":      api_key,
+            "url":          url,
+            "country_code": "in",
+        },
+        timeout=30,
+    )
+    print(f"   ScraperAPI HTTP {resp.status_code}")
+    resp.raise_for_status()
+    return resp.text
+
+
+# ─── METHOD 3: AllOrigins CORS proxy (free, no key needed) ───────────────────
+def fetch_via_allorigins(url: str) -> str:
+    import urllib.parse
+    proxy = f"https://api.allorigins.win/get?url={urllib.parse.quote(url)}"
+    resp  = requests.get(proxy, timeout=20)
+    print(f"   AllOrigins HTTP {resp.status_code}")
+    resp.raise_for_status()
+    data = resp.json()
+    return data.get("contents", "")
+
+
+# ─── METHOD 4: Direct request (sometimes works depending on runner IP) ────────
+def fetch_direct(url: str) -> str:
+    session = requests.Session()
+    session.headers.update(BROWSER_HEADERS)
+    session.get("https://in.bookmyshow.com/", timeout=15)   # get cookies first
+    resp = session.get(url, timeout=15)
+    print(f"   Direct HTTP {resp.status_code}")
+    resp.raise_for_status()
+    return resp.text
+
+
+def fetch_page(url: str) -> str:
+    """Try multiple methods in order until one works."""
+    methods = []
+
+    if os.environ.get("SCRAPINGBEE_KEY"):
+        methods.append(("ScrapingBee",  lambda: fetch_via_scrapingbee(url)))
+    if os.environ.get("SCRAPERAPI_KEY"):
+        methods.append(("ScraperAPI",   lambda: fetch_via_scraperapi(url)))
+
+    methods.append(("AllOrigins",   lambda: fetch_via_allorigins(url)))
+    methods.append(("Direct",       lambda: fetch_direct(url)))
+
+    last_error = None
+    for name, fn in methods:
+        try:
+            print(f"   Trying {name}...")
+            html = fn()
+            if html and len(html) > 500:
+                print(f"   ✅ {name} succeeded ({len(html)} chars)")
+                return html
+            else:
+                print(f"   ⚠️  {name} returned empty/short response")
+        except Exception as e:
+            print(f"   ❌ {name} failed: {e}")
+            last_error = e
+            time.sleep(2)
+
+    raise Exception(f"All fetch methods failed. Last error: {last_error}")
 
 
 def extract_movie_name(html: str) -> str:
@@ -101,37 +156,6 @@ def check_imax_in_html(html: str) -> tuple:
     )
 
     return (booking_open and imax_near_booking), found_formats
-
-
-def check_imax_via_api(session: requests.Session, event_code: str) -> tuple:
-    api_url = (
-        f"https://in.bookmyshow.com/api/movies-data/showtimes-by-event"
-        f"?appCode=MOBAND2&appVersion=14.3.4&language=en"
-        f"&eventCode={event_code}&regionCode={CITY_CODE}"
-        f"&subRegion={CITY_CODE}&format=json&date="
-    )
-    try:
-        resp = session.get(api_url, timeout=15)
-        print(f"   API HTTP {resp.status_code}")
-        if resp.status_code != 200:
-            return False, []
-        data = resp.json()
-
-        imax_venues = []
-        venues = data.get("ShowDetails", []) or data.get("BookMyShow", {}).get("ShowDetails", [])
-        for venue in venues:
-            venue_name = venue.get("VenueName", "")
-            for show in (venue.get("ShowDetails") or []):
-                screen_name = show.get("ScreenName", "").lower()
-                format_name = show.get("ScreenFormat", "").lower()
-                if "imax" in screen_name or "imax" in format_name:
-                    imax_venues.append(f"{venue_name} — {show.get('ScreenName', 'IMAX')}")
-
-        return len(imax_venues) > 0, imax_venues
-
-    except Exception as e:
-        print(f"⚠️  API check failed: {e}")
-        return False, []
 
 
 def send_email(movie_name: str, url: str, imax_details: list):
@@ -176,21 +200,12 @@ def main():
     print(f"🔍 Checking IMAX availability for: {BMS_URL}")
     print(f"🎟️  Event Code: {EVENT_CODE}")
 
-    session = make_session()
-
-    # Method 1 — BookMyShow internal API
-    print("\n📡 Trying BookMyShow API...")
-    imax_found, imax_venues = check_imax_via_api(session, EVENT_CODE)
-
-    # Method 2 — HTML scrape fallback
     print("\n🌐 Fetching movie page...")
-    html = fetch_page(session, BMS_URL)
+    html = fetch_page(BMS_URL)
     movie_name = extract_movie_name(html)
     print(f"🎬 Movie: {movie_name}")
 
-    if not imax_found:
-        print("🔎 API inconclusive, checking HTML for IMAX...")
-        imax_found, imax_venues = check_imax_in_html(html)
+    imax_found, imax_venues = check_imax_in_html(html)
 
     if imax_found:
         print(f"🟢 IMAX booking is OPEN! Details: {imax_venues}")
