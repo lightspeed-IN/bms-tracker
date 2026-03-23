@@ -1,6 +1,6 @@
-# 🎬 BookMyShow IMAX Tracker
+# 🎬 BookMyShow Tracker
 
-Get an **automatic email the moment IMAX booking opens** for any movie on BookMyShow — runs every 30 minutes in the cloud for free. No server, no laptop needed.
+Get an **automatic email the moment bookings open** for any movie on BookMyShow — runs every 30 minutes in the cloud for free. No server, no laptop needed.
 
 > Built for Mumbai but works for any city on BookMyShow!
 
@@ -9,9 +9,9 @@ Get an **automatic email the moment IMAX booking opens** for any movie on BookMy
 ## ✨ How It Works
 
 1. GitHub runs the script every 30 minutes automatically
-2. It checks if IMAX is actually bookable (not just listed)
-3. **No IMAX yet** → does nothing, checks again in 30 min
-4. **IMAX opens** → sends you an email instantly 🎉
+2. It checks if ticket is actually bookable (not just listed)
+3. **Not opened yet** → does nothing, checks again in 30 min
+4. **Booking opens** → sends you an email instantly 🎉
 
 ---
 
@@ -77,7 +77,7 @@ Add all 5 secrets:
 ```
 ✅ ScraperAPI succeeded
 🎬 Movie: Your Movie Name
-🔴 IMAX not available yet for booking.
+🔴 Ticket not available yet for booking.
    No email sent. Checking again at next scheduled run.
 ```
 That means everything is working perfectly — just wait for the email!
@@ -86,10 +86,10 @@ That means everything is working perfectly — just wait for the email!
 
 ## 📧 What the email looks like
 
-When IMAX opens, you'll get a nicely formatted email with:
+When booking opens, you'll get a nicely formatted email with:
 - Movie name
-- IMAX venues available
-- A big **"Book IMAX Tickets Now"** button linking directly to BookMyShow
+- Venues available
+- A big **"Book Tickets Now"** button linking directly to BookMyShow
 
 ---
 
