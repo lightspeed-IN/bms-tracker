@@ -29,6 +29,5 @@ jobs:
           GMAIL_PASS:    ${{ secrets.GMAIL_PASS }}
           NOTIFY_EMAIL:  ${{ secrets.NOTIFY_EMAIL }}
           SCRAPERAPI_KEY:   ${{ secrets.SCRAPERAPI_KEY }}
-          run: |
-  python check_4dx_CSWO.py
-  python check_imax_CSWO.py
+          run: python check_4dx_CSWO.py
+          python check_imax_CSWO.py
