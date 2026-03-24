@@ -13,7 +13,6 @@ GMAIL_PASS   = os.environ["GMAIL_PASS"]
 NOTIFY_EMAIL = os.environ["NOTIFY_EMAIL"]
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Target: Miraj Cinemas IMAX Wadala — Project Hail Mary — 26 Mar 2026
 CINEMA_CODE  = "MCIW"
 EVENT_CODE   = "ET00451760"
 SHOW_DATE    = "20260326"
@@ -21,19 +20,11 @@ MOVIE_NAME   = "Project Hail Mary"
 CINEMA_NAME  = "Miraj Cinemas IMAX Wadala"
 BOOKING_URL  = "https://in.bookmyshow.com/cinemas/mumbai/miraj-cinemas-imax-wadala/buytickets/MCIW/20260326"
 
-# BMS API — returns all shows for a specific cinema + date
 CINEMA_API_URL = (
     f"https://in.bookmyshow.com/api/movies-data/showtimes-by-event"
     f"?appCode=MOBAND2&appVersion=14.3.4&language=en"
     f"&eventCode={EVENT_CODE}&regionCode=MUMBAI"
     f"&subRegion=MUMBAI&format=json&venueCode={CINEMA_CODE}&date={SHOW_DATE}"
-)
-
-# BMS venue page API — alternative endpoint
-VENUE_API_URL = (
-    f"https://in.bookmyshow.com/api/movies-data/venue-wise-showtimes"
-    f"?venueCode={CINEMA_CODE}&eventCode={EVENT_CODE}"
-    f"&regionCode=MUMBAI&date={SHOW_DATE}&format=json"
 )
 
 
@@ -46,7 +37,7 @@ def fetch_via_scraperapi(url: str) -> str:
         params={"api_key": api_key, "url": url, "country_code": "in"},
         timeout=30,
     )
-    print(f"   HTTP {resp.status_code} ({'OK' if resp.status_code == 200 else 'FAIL'})")
+    print(f"   HTTP {resp.status_code}")
     resp.raise_for_status()
     return resp.text
 
@@ -63,81 +54,90 @@ def fetch_page(url: str) -> str:
     raise Exception("All fetch attempts failed")
 
 
-def check_imax_at_cinema() -> tuple:
-    """
-    Check if IMAX shows are available at Miraj IMAX Wadala for Project Hail Mary.
-    Uses 3 methods — returns (found: bool, show_times: list)
-    """
+def check_shows() -> tuple:
     show_times = []
 
     # ── Method 1: Cinema-specific showtime API ────────────────────────────────
     print("📡 Method 1: Cinema showtime API...")
     try:
         data_str = fetch_page(CINEMA_API_URL)
-        data_lower = data_str.lower()
 
-        if "imax" in data_lower or "show" in data_lower:
-            # Extract show times
-            times = re.findall(r'"ShowTime"\s*:\s*"([^"]+)"', data_str)
-            screens = re.findall(r'"ScreenName"\s*:\s*"([^"]+)"', data_str)
-            formats = re.findall(r'"ScreenFormat"\s*:\s*"([^"]+)"', data_str)
+        # Look for ShowTime keys in JSON — these are actual show start times
+        # Format in BMS API: "ShowTime":"09:30:00" or "ShowTime":"21:30"
+        api_times = re.findall(r'"ShowTime"\s*:\s*"(\d{1,2}:\d{2}(?::\d{2})?)"', data_str)
+        api_screens = re.findall(r'"ScreenName"\s*:\s*"([^"]+)"', data_str)
+        api_formats = re.findall(r'"ScreenFormat"\s*:\s*"([^"]+)"', data_str)
 
-            print(f"   Screens: {list(set(screens))[:5]}")
-            print(f"   Formats: {list(set(formats))[:5]}")
-            print(f"   Show times found: {times[:5]}")
+        print(f"   Screens found: {list(set(api_screens))[:5]}")
+        print(f"   Formats found: {list(set(api_formats))[:5]}")
+        print(f"   Show times found: {api_times[:8]}")
 
-            if times:
-                show_times = times
-                print(f"   ✅ Method 1: Shows found at {CINEMA_NAME}!")
-                return True, show_times
-        else:
-            print("   🔴 Method 1: No shows found yet")
-
-    except Exception as e:
-        print(f"   ⚠️  Method 1 failed: {e}")
-
-    # ── Method 2: Venue page API ──────────────────────────────────────────────
-    print("📡 Method 2: Venue page API...")
-    try:
-        data_str = fetch_page(VENUE_API_URL)
-        times = re.findall(r'"ShowTime"\s*:\s*"([^"]+)"', data_str)
-        if times:
-            show_times = times
-            print(f"   ✅ Method 2: Shows found! Times: {times[:5]}")
+        if api_times:
+            show_times = api_times
+            print(f"   ✅ Method 1: {len(api_times)} shows found!")
             return True, show_times
         else:
-            print("   🔴 Method 2: No shows found yet")
-    except Exception as e:
-        print(f"   ⚠️  Method 2 failed: {e}")
+            print("   🔴 Method 1: No shows in API yet")
 
-    # ── Method 3: Scrape the actual booking page ──────────────────────────────
-    print("🌐 Method 3: Scraping booking page directly...")
+    except Exception as e:
+        print(f"   ⚠️  Method 1 error: {e}")
+
+    # ── Method 2: Scrape the booking page ────────────────────────────────────
+    print("🌐 Method 2: Scraping booking page...")
     try:
         html = fetch_page(BOOKING_URL)
-        html_lower = html.lower()
 
-        # Look for show times or seat layout (means booking is open)
-        time_matches = re.findall(
-            r'\b([01]?\d|2[0-3]):[0-5]\d\s*(?:AM|PM|am|pm)\b', html
+        # Look for proper time format: "09:30 AM", "9:30 AM", "21:30" in JSON/HTML
+        # BMS embeds show data as JSON strings like "showTime":"09:30 AM"
+        json_times = re.findall(
+            r'"(?:showTime|ShowTime|time|startTime)"\s*:\s*"(\d{1,2}:\d{2}(?:\s*[AaPp][Mm])?)"',
+            html
         )
-        has_seats    = "seattype" in html_lower or "seat-" in html_lower
-        has_shows    = "showtime" in html_lower or "show-time" in html_lower
-        has_imax     = "imax" in html_lower
 
-        print(f"   Times found: {time_matches[:5]}")
-        print(f"   Has seat layout: {has_seats}")
-        print(f"   Has showtime data: {has_shows}")
-        print(f"   IMAX mentioned: {has_imax}")
+        # Also look for time patterns inside __NEXT_DATA__ JSON blob
+        next_data = re.search(
+            r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.+?)</script>',
+            html, re.DOTALL
+        )
+        next_times = []
+        if next_data:
+            blob = next_data.group(1)
+            next_times = re.findall(
+                r'"(?:showTime|ShowTime|time|startTime|showtime)"\s*:\s*"(\d{1,2}:\d{2}(?:\s*[AaPp][Mm])?)"',
+                blob
+            )
+            print(f"   NEXT_DATA times: {next_times[:5]}")
 
-        if time_matches or has_seats:
-            show_times = time_matches[:5] if time_matches else ["Check BMS app"]
-            print(f"   ✅ Method 3: Booking page has show data!")
+        all_times = list(set(json_times + next_times))
+        print(f"   JSON show times: {all_times[:8]}")
+
+        if all_times:
+            show_times = all_times
+            print(f"   ✅ Method 2: Shows found on booking page!")
             return True, show_times
-        else:
-            print("   🔴 Method 3: No show data on booking page yet")
+
+        # Last resort — check if "No shows" or "coming soon" message is absent
+        # and a specific session/show element exists
+        has_no_shows = any(phrase in html.lower() for phrase in [
+            "no shows", "no shows available", "shows not available",
+            "coming soon", "currently not available"
+        ])
+        has_show_element = any(phrase in html.lower() for phrase in [
+            '"sessionid"', '"session_id"', '"showid"', '"show_id"',
+            'class="show-time"', 'class="showtime"', '"ShowId"'
+        ])
+
+        print(f"   'No shows' message present: {has_no_shows}")
+        print(f"   Show session element present: {has_show_element}")
+
+        if has_show_element and not has_no_shows:
+            print("   ✅ Method 2: Show sessions detected on page!")
+            return True, ["Check BMS app for timings"]
+
+        print("   🔴 Method 2: No confirmed shows on booking page")
 
     except Exception as e:
-        print(f"   ⚠️  Method 3 failed: {e}")
+        print(f"   ⚠️  Method 2 error: {e}")
 
     return False, []
 
@@ -149,7 +149,7 @@ def send_email(show_times: list):
         else "<p>Shows are now available — check BookMyShow for timings.</p>"
     )
 
-    subject = f"🎬 IMAX Shows Open at {CINEMA_NAME} — Book Now!"
+    subject = f"🎬 IMAX Shows OPEN at {CINEMA_NAME} — Book Now!"
     body = f"""
 <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
   <h2 style="color:#e63946;">🎬 IMAX Tickets Are Live!</h2>
@@ -184,7 +184,7 @@ def main():
     print(f"📅 Date: 26 Mar 2026")
     print(f"🎟️  Event: {EVENT_CODE} | Venue: {CINEMA_CODE}\n")
 
-    found, show_times = check_imax_at_cinema()
+    found, show_times = check_shows()
 
     print()
     if found:
