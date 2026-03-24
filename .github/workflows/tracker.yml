@@ -3,7 +3,7 @@ name: BookMyShow Availability Tracker
 on:
   schedule:
     # Runs every 30 minutes (GitHub Actions minimum is 5 min, 30 is safer to avoid rate limits)
-    - cron: "*/30 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:   # Allows you to trigger manually from GitHub UI
 
 jobs:
