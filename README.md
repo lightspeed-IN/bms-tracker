@@ -1,6 +1,6 @@
-# 🎬 BookMyShow Tracker
+# 🎬 BookMyShow Movie Format Tracker
 
-Get an **automatic email the moment bookings open** for any movie on BookMyShow — runs every 30 minutes in the cloud for free. No server, no laptop needed.
+Get an **automatic email the moment bookings open** for any movie on BookMyShow — runs every 15 minutes in the cloud for free. No server, no laptop needed.
 
 > Built for Mumbai but works for any city on BookMyShow!
 
@@ -8,7 +8,7 @@ Get an **automatic email the moment bookings open** for any movie on BookMyShow 
 
 ## ✨ How It Works
 
-1. GitHub runs the script every 30 minutes automatically
+1. GitHub runs the script every 15 minutes automatically
 2. It checks if ticket is actually bookable (not just listed)
 3. **Not opened yet** → does nothing, checks again in 30 min
 4. **Booking opens** → sends you an email instantly 🎉
