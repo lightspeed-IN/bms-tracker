@@ -3,7 +3,6 @@ import re
 import smtplib
 import requests
 import time
-import urllib.parse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -14,37 +13,14 @@ NOTIFY_EMAIL = os.environ["NOTIFY_EMAIL"]
 # ─────────────────────────────────────────────────────────────────────────────
 
 CINEMA_CODE  = "MCIW"
-EVENT_CODE   = "ET00451760"   # Project Hail Mary
+EVENT_CODE   = "ET00451760"
 SHOW_DATE    = "20260326"
 MOVIE_NAME   = "Project Hail Mary"
 CINEMA_NAME  = "Miraj Cinemas IMAX Wadala"
+FORMAT       = "IMAX"
 
-# This URL is specific to Project Hail Mary at this cinema
-MOVIE_BOOKING_URL = (
-    f"https://in.bookmyshow.com/buytickets/{EVENT_CODE}/cinema/{CINEMA_CODE}/{SHOW_DATE}"
-)
-
-# Alternative URL format
-MOVIE_BOOKING_URL_2 = (
-    f"https://in.bookmyshow.com/mumbai/movies/project-hail-mary/{EVENT_CODE}"
-    f"?date={SHOW_DATE}&venueCode={CINEMA_CODE}"
-)
-
-# API — movie + cinema specific
-CINEMA_API_URL = (
-    f"https://in.bookmyshow.com/api/movies-data/showtimes-by-event"
-    f"?appCode=MOBAND2&appVersion=14.3.4&language=en"
-    f"&eventCode={EVENT_CODE}&regionCode=MUMBAI"
-    f"&subRegion=MUMBAI&format=json&venueCode={CINEMA_CODE}&date={SHOW_DATE}"
-)
-
-# This is the key API — fetches all venues for the movie, we filter by MCIW
-ALL_VENUES_API = (
-    f"https://in.bookmyshow.com/api/movies-data/showtimes-by-event"
-    f"?appCode=MOBAND2&appVersion=14.3.4&language=en"
-    f"&eventCode={EVENT_CODE}&regionCode=MUMBAI"
-    f"&subRegion=MUMBAI&format=json&date={SHOW_DATE}"
-)
+# Scrape the cinema page directly — proven most reliable
+CINEMA_PAGE_URL = f"https://in.bookmyshow.com/cinemas/mumbai/miraj-cinemas-imax-wadala/buytickets/MCIW/{SHOW_DATE}"
 
 
 def fetch_via_scraperapi(url: str) -> str:
@@ -56,7 +32,7 @@ def fetch_via_scraperapi(url: str) -> str:
         params={"api_key": api_key, "url": url, "country_code": "in"},
         timeout=30,
     )
-    print(f"   HTTP {resp.status_code}")
+    print(f"   HTTP {resp.status_code} ({len(resp.text)} chars)")
     resp.raise_for_status()
     return resp.text
 
@@ -65,7 +41,7 @@ def fetch_page(url: str) -> str:
     for attempt in range(3):
         try:
             html = fetch_via_scraperapi(url)
-            if html and len(html) > 200:
+            if html and len(html) > 500:
                 return html
         except Exception as e:
             print(f"   ❌ Attempt {attempt+1} failed: {e}")
@@ -74,101 +50,65 @@ def fetch_page(url: str) -> str:
 
 
 def check_shows() -> tuple:
-    show_times = []
-
-    # ── Method 1: All-venues API, filter by cinema code MCIW ─────────────────
-    print("📡 Method 1: All-venues API (filtering for MCIW)...")
+    print(f"🌐 Scraping cinema page for {MOVIE_NAME} IMAX...")
     try:
-        data_str = fetch_page(ALL_VENUES_API)
+        html = fetch_page(CINEMA_PAGE_URL)
+        html_lower = html.lower()
 
-        # Find the section of JSON that belongs to MCIW venue
-        # Look for MCIW venue block and extract show times from it only
-        mciw_block = re.search(
-            r'"VenueCode"\s*:\s*"MCIW".{0,5000}?(?="VenueCode"|\Z)',
-            data_str, re.DOTALL
-        )
+        has_phm  = "project hail mary" in html_lower or EVENT_CODE.lower() in html_lower
+        has_imax = "imax" in html_lower
 
-        if mciw_block:
-            block = mciw_block.group(0)
-            times = re.findall(r'"ShowTime"\s*:\s*"(\d{1,2}:\d{2}(?::\d{2})?)"', block)
-            screens = re.findall(r'"ScreenName"\s*:\s*"([^"]+)"', block)
-            print(f"   MCIW block found! Screens: {list(set(screens))[:5]}")
-            print(f"   Show times: {times[:8]}")
-            if times:
-                show_times = times
-                print(f"   ✅ Method 1: {len(times)} shows at MCIW!")
-                return True, show_times
-            else:
-                print("   🔴 Method 1: MCIW venue found but no shows yet")
-        else:
-            print("   🔴 Method 1: MCIW venue not in API response yet")
-            # Show what venues ARE in the response for debugging
-            venues = re.findall(r'"VenueCode"\s*:\s*"([^"]+)"', data_str)
-            venue_names = re.findall(r'"VenueName"\s*:\s*"([^"]+)"', data_str)
-            print(f"   Venues currently available: {list(zip(venues[:5], venue_names[:5]))}")
+        print(f"   'Project Hail Mary' on page: {has_phm}")
+        print(f"   'IMAX' on page: {has_imax}")
+
+        if not has_phm:
+            print("   🔴 Project Hail Mary not listed at Miraj IMAX Wadala yet")
+            return False, []
+
+        if not has_imax:
+            print("   🔴 No IMAX shows on this page yet")
+            return False, []
+
+        # Find Project Hail Mary section that contains IMAX within 3000 chars
+        phm_positions = [m.start() for m in re.finditer(r'project hail mary', html_lower)]
+        for pos in phm_positions:
+            window      = html_lower[pos:pos+3000]
+            window_orig = html[pos:pos+3000]
+            if "imax" in window:
+                times = re.findall(
+                    r'\b((?:0?[1-9]|1[0-2]):[0-5]\d\s*(?:AM|PM))\b',
+                    window_orig
+                )
+                if times:
+                    print(f"   ✅ Project Hail Mary IMAX section found! Times: {times[:6]}")
+                    return True, times
+
+        print("   🔴 IMAX mentioned on page but not linked to Project Hail Mary yet")
+        return False, []
 
     except Exception as e:
-        print(f"   ⚠️  Method 1 error: {e}")
-
-    # ── Method 2: Movie-specific booking page at this cinema ──────────────────
-    print("🌐 Method 2: Movie+cinema specific page...")
-    for url in [MOVIE_BOOKING_URL, MOVIE_BOOKING_URL_2]:
-        try:
-            html = fetch_page(url)
-            # Look for show times in JSON data — but ONLY if page is for correct movie
-            # Verify it's the right movie first
-            is_correct_movie = (
-                EVENT_CODE.lower() in html.lower() or
-                "project hail mary" in html.lower() or
-                "hail mary" in html.lower()
-            )
-            print(f"   Correct movie page: {is_correct_movie}")
-
-            if not is_correct_movie:
-                print("   ⚠️  Page doesn't seem to be for Project Hail Mary, skipping")
-                continue
-
-            # Extract show times from JSON keys only
-            times = re.findall(
-                r'"(?:showTime|ShowTime|time|startTime|showtime)"\s*:\s*"(\d{1,2}:\d{2}(?:\s*[AaPp][Mm])?)"',
-                html
-            )
-            print(f"   Show times: {times[:8]}")
-
-            if times:
-                show_times = times
-                print(f"   ✅ Method 2: Shows found for Project Hail Mary!")
-                return True, show_times
-            else:
-                print("   🔴 Method 2: No shows for this movie yet")
-
-        except Exception as e:
-            print(f"   ⚠️  Method 2 ({url[:50]}...) error: {e}")
-
-    return False, []
+        print(f"   ⚠️  Error: {e}")
+        return False, []
 
 
 def send_email(show_times: list):
-    # Format times nicely
     formatted = sorted(set(show_times))
     times_html = (
-        "<ul>" + "".join(f"<li><b>{t}</b></li>" for t in formatted) + "</ul>"
-        if formatted
-        else "<p>Shows are now available — check BookMyShow for timings.</p>"
+        "<ul>" + "".join(f"<li><b>{t}</b></li>" for v in formatted for t in [v]) + "</ul>"
+        if formatted else "<p>Check BookMyShow for show timings.</p>"
     )
-
-    subject = f"🎬 {MOVIE_NAME} IMAX Shows OPEN at {CINEMA_NAME}!"
+    subject = f"🎬 IMAX Shows OPEN — {MOVIE_NAME} at {CINEMA_NAME}!"
     body = f"""
 <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px;">
-  <h2 style="color:#e63946;">🎬 Tickets Are Live!</h2>
-  <p>Shows for <b>{MOVIE_NAME}</b> are now bookable at <b>{CINEMA_NAME}</b>!</p>
+  <h2 style="color:#e63946;">🎬 IMAX Tickets Are Live!</h2>
+  <p><b>IMAX</b> shows for <b>{MOVIE_NAME}</b> are now bookable at <b>{CINEMA_NAME}</b>!</p>
   <h3>🕐 Show Timings on 26 Mar 2026:</h3>
   {times_html}
   <br>
-  <a href="https://in.bookmyshow.com/movies/mumbai/project-hail-mary/{EVENT_CODE}"
+  <a href="https://in.bookmyshow.com/cinemas/mumbai/miraj-cinemas-imax-wadala/buytickets/MCIW/{SHOW_DATE}"
      style="background:#e63946;color:white;padding:12px 28px;
             text-decoration:none;border-radius:6px;font-weight:bold;font-size:16px;">
-    👉 Book Tickets Now
+    👉 Book IMAX Tickets Now
   </a>
   <br><br>
   <p style="color:#888;font-size:12px;">⚡ IMAX seats sell out in minutes — book fast!</p>
@@ -180,7 +120,6 @@ def send_email(show_times: list):
     msg["From"]    = GMAIL_USER
     msg["To"]      = NOTIFY_EMAIL
     msg.attach(MIMEText(body, "html"))
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_PASS)
         server.sendmail(GMAIL_USER, NOTIFY_EMAIL, msg.as_string())
@@ -189,17 +128,17 @@ def send_email(show_times: list):
 
 def main():
     print(f"🎬 {MOVIE_NAME} @ {CINEMA_NAME}")
-    print(f"📅 Date: 26 Mar 2026")
+    print(f"📅 Date: 26 Mar 2026 | Format: {FORMAT}")
     print(f"🎟️  Event: {EVENT_CODE} | Venue: {CINEMA_CODE}\n")
 
     found, show_times = check_shows()
 
     print()
     if found:
-        print(f"🟢 SHOWS ARE BOOKABLE! Times: {show_times}")
+        print(f"🟢 IMAX SHOWS BOOKABLE! Times: {show_times}")
         send_email(show_times)
     else:
-        print("🔴 No shows for Project Hail Mary at Miraj IMAX Wadala yet.")
+        print(f"🔴 No IMAX shows for {MOVIE_NAME} at {CINEMA_NAME} yet.")
         print("   Will check again at next scheduled run.")
 
 
