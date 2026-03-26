@@ -13,7 +13,7 @@ NOTIFY_EMAIL = os.environ["NOTIFY_EMAIL"]
 # ─────────────────────────────────────────────────────────────────────────────
 
 CINEMA_CODE  = "MCIW"
-EVENT_CODE   = "ET00451760"
+EVENT_CODE   = "ET00481564"
 SHOW_DATE    = "20260326"
 MOVIE_NAME   = "Project Hail Mary"
 CINEMA_NAME  = "Miraj Cinemas IMAX Wadala"
